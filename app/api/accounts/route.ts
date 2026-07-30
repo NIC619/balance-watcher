@@ -1,5 +1,8 @@
-import { env } from "cloudflare:workers";
-import { ensureDatabase } from "../../../lib/database";
+import {
+  requestIsAuthenticated,
+  unauthorizedResponse,
+} from "../../../lib/auth";
+import { ensureDatabase, getDb } from "../../../lib/database";
 import { networkById } from "../../../lib/networks";
 
 const addressPattern = /^0x[a-fA-F0-9]{40}$/;
@@ -19,13 +22,17 @@ function accountInput(value: unknown) {
 }
 
 export async function POST(request: Request) {
-  await ensureDatabase(env.DB);
+  if (!requestIsAuthenticated(request)) return unauthorizedResponse();
+  const db = getDb();
+  await ensureDatabase(db);
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const action = String(body.action || "create");
 
     if (action === "delete") {
-      await env.DB.prepare("DELETE FROM watched_accounts WHERE id = ?").bind(Number(body.id)).run();
+      await db.query("DELETE FROM watched_accounts WHERE id = $1", [
+        Number(body.id),
+      ]);
       return Response.json({ ok: true });
     }
 
@@ -33,27 +40,42 @@ export async function POST(request: Request) {
       const id = Number(body.id);
       const network = networkById(Number(body.chainId));
       if (!network) throw new Error("Choose a target network.");
-      const source = await env.DB
-        .prepare("SELECT name, address, threshold FROM watched_accounts WHERE id = ?")
-        .bind(id)
-        .first<{ name: string; address: string; threshold: string }>();
+      const sourceResult = await db.query<{
+        name: string;
+        address: string;
+        threshold: string;
+      }>(
+        "SELECT name, address, threshold FROM watched_accounts WHERE id = $1",
+        [id]
+      );
+      const source = sourceResult.rows[0];
       if (!source) throw new Error("Account not found.");
-      await env.DB
-        .prepare(
-          "INSERT INTO watched_accounts (name, address, chain_id, chain_name, symbol, rpc_url, threshold) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(source.name, source.address, network.chainId, network.name, network.symbol, network.rpcUrl, source.threshold)
-        .run();
+      await db.query(
+        `INSERT INTO watched_accounts
+         (name, address, chain_id, chain_name, symbol, rpc_url, threshold)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          source.name,
+          source.address,
+          network.chainId,
+          network.name,
+          network.symbol,
+          network.rpcUrl,
+          source.threshold,
+        ]
+      );
       return Response.json({ ok: true });
     }
 
     const input = accountInput(body);
     if (action === "update") {
-      await env.DB
-        .prepare(
-          "UPDATE watched_accounts SET name = ?, address = ?, chain_id = ?, chain_name = ?, symbol = ?, rpc_url = ?, threshold = ?, status = 'pending', alert_active = 0 WHERE id = ?"
-        )
-        .bind(
+      await db.query(
+        `UPDATE watched_accounts
+         SET name = $1, address = $2, chain_id = $3, chain_name = $4,
+             symbol = $5, rpc_url = $6, threshold = $7,
+             status = 'pending', alert_active = FALSE
+         WHERE id = $8`,
+        [
           input.name,
           input.address,
           input.network.chainId,
@@ -61,24 +83,24 @@ export async function POST(request: Request) {
           input.network.symbol,
           input.network.rpcUrl,
           input.threshold,
-          Number(body.id)
-        )
-        .run();
+          Number(body.id),
+        ]
+      );
     } else {
-      await env.DB
-        .prepare(
-          "INSERT INTO watched_accounts (name, address, chain_id, chain_name, symbol, rpc_url, threshold) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(
+      await db.query(
+        `INSERT INTO watched_accounts
+         (name, address, chain_id, chain_name, symbol, rpc_url, threshold)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
           input.name,
           input.address,
           input.network.chainId,
           input.network.name,
           input.network.symbol,
           input.network.rpcUrl,
-          input.threshold
-        )
-        .run();
+          input.threshold,
+        ]
+      );
     }
     return Response.json({ ok: true });
   } catch (error) {

@@ -1,9 +1,16 @@
-import { env } from "cloudflare:workers";
 import { getSettings, listAccounts } from "../../../lib/database";
+import {
+  requestIsAuthenticated,
+  unauthorizedResponse,
+} from "../../../lib/auth";
 import { NETWORKS } from "../../../lib/networks";
 
-export async function GET() {
-  const [accounts, settings] = await Promise.all([listAccounts(env.DB), getSettings(env.DB)]);
+export async function GET(request: Request) {
+  if (!requestIsAuthenticated(request)) return unauthorizedResponse();
+  const [accounts, settings] = await Promise.all([
+    listAccounts(),
+    getSettings(),
+  ]);
   return Response.json({
     accounts,
     settings: settings

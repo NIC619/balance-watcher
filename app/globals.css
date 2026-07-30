@@ -122,6 +122,19 @@ button {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.signout-button {
+  border: 0;
+  padding: 6px 0;
+  color: #dfeee5;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.signout-button:hover {
+  color: white;
+}
+
 .main {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
@@ -631,6 +644,64 @@ h1 {
   animation: load 1s ease-in-out infinite;
 }
 
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 75% 20%, rgba(216, 243, 106, 0.11), transparent 30rem),
+    var(--green);
+}
+
+.login-card {
+  width: min(430px, 100%);
+  padding: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: 0 28px 80px rgba(6, 33, 21, 0.32);
+}
+
+.login-brand {
+  margin-bottom: 38px;
+  color: var(--green);
+}
+
+.login-brand .brand-mark {
+  border-color: #cfdad3;
+  background: var(--green);
+}
+
+.login-card h1 {
+  font-size: 48px;
+}
+
+.login-copy {
+  margin: 14px 0 28px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.login-form {
+  display: grid;
+  gap: 17px;
+}
+
+.login-submit {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.login-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #9f3527;
+  background: var(--alert-soft);
+  font-size: 12px;
+}
+
 @keyframes load {
   0% { width: 0; left: 0; }
   50% { width: 45%; left: 25%; }
@@ -642,6 +713,9 @@ h1 {
     padding: 0 20px;
   }
   .status-live {
+    display: none;
+  }
+  .signout-button {
     display: none;
   }
   .main {

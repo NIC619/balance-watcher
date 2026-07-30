@@ -95,7 +95,9 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    load().catch((error: Error) => notify(error.message, true));
+    // Initial synchronization with the authenticated server-side watchlist.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load().catch((error: Error) => notify(error.message, true));
   }, [load, notify]);
 
   useEffect(() => {
@@ -234,6 +236,15 @@ export function Dashboard() {
           </div>
           <button className="icon-button" onClick={openSettings} aria-label="Open notification settings" title="Settings">
             ⚙
+          </button>
+          <button
+            className="signout-button"
+            onClick={async () => {
+              await fetch("/api/auth/logout", { method: "POST" });
+              window.location.assign("/login");
+            }}
+          >
+            Sign out
           </button>
         </div>
       </header>

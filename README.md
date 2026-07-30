@@ -3,37 +3,70 @@
 Watchtower monitors native balances for Ethereum-compatible accounts and sends
 Telegram alerts when an account crosses below its configured threshold.
 
-## Features
+## Architecture
 
-- Accounts grouped and sorted by EVM network
-- Custom name tags and native-token thresholds
-- One-click duplication of an address to another network
-- Live JSON-RPC balance checks
-- Telegram test messages and transition-based low-balance alerts
-- D1-backed persistent watchlist and settings
+- Next.js web dashboard and API
+- PostgreSQL for accounts, settings, and alert state
+- Independent 24/7 monitor worker
+- Single-owner authentication using an HTTP-only signed session cookie
 
-## Development
+The web service and worker share the same `DATABASE_URL`. A PostgreSQL advisory
+lock prevents an automatic worker check and a manual “Check now” request from
+running at the same time.
 
-Requires Node.js 22.13 or newer.
+## Local development
 
-```bash
-pnpm install
-pnpm run dev
-```
-
-Generate a migration after schema changes:
+Requires Node.js 22.13+, npm, and Docker.
 
 ```bash
-pnpm run db:generate
+cp .env.example .env.local
+docker compose up -d postgres
+npm install
+npm run dev
 ```
 
-Build and verify:
+In a second terminal, start the monitor:
 
 ```bash
-pnpm run build
-pnpm test
+npm run worker
 ```
 
-The Worker exports a scheduled handler that runs the same monitor used by the
-“Check now” action. Configure a cron trigger for that handler in the production
-Cloudflare environment to keep checks running when the dashboard is closed.
+Open `http://localhost:3000`. Choose private values for `APP_USERNAME` and
+`APP_PASSWORD`, and generate `AUTH_SECRET` with:
+
+```bash
+openssl rand -base64 48
+```
+
+## Railway deployment
+
+Create one Railway project with:
+
+1. A PostgreSQL database.
+2. A web service connected to this repository.
+3. A worker service connected to the same repository.
+
+Set these variables on both application services:
+
+- `DATABASE_URL=${{Postgres.DATABASE_URL}}`
+- `APP_USERNAME`
+- `APP_PASSWORD`
+- `AUTH_SECRET`
+
+Use the default build command `npm run build`.
+
+- Web start command: `npm run start`
+- Worker start command: `npm run worker`
+
+Expose a public domain only for the web service. The worker needs no public
+domain. The monitor interval is controlled from Telegram settings in the UI.
+
+## Commands
+
+```bash
+npm run dev
+npm run worker
+npm run build
+npm test
+npm run lint
+```
