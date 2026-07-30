@@ -1,3 +1,5 @@
+import { NETWORKS } from "./networks";
+
 export type AccountRow = {
   id: number;
   name: string;
@@ -63,6 +65,15 @@ export async function ensureDatabase(db: D1Database) {
 
 export async function listAccounts(db: D1Database) {
   await ensureDatabase(db);
+  await db.batch(
+    NETWORKS.map((network) =>
+      db
+        .prepare(
+          "UPDATE watched_accounts SET chain_name = ?, symbol = ?, rpc_url = ? WHERE chain_id = ?"
+        )
+        .bind(network.name, network.symbol, network.rpcUrl, network.chainId)
+    )
+  );
   const result = await db
     .prepare("SELECT * FROM watched_accounts ORDER BY chain_name ASC, name ASC")
     .all<AccountRow>();
