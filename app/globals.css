@@ -410,6 +410,22 @@ h1 {
   font: 11px var(--font-geist-mono), monospace;
 }
 
+.asset-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--green-2);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.asset-label span {
+  color: var(--muted);
+  font: 9px var(--font-geist-mono), monospace;
+  font-weight: 400;
+}
+
 .status-pill {
   padding: 5px 9px;
   border-radius: 99px;
@@ -495,6 +511,15 @@ h1 {
   color: var(--green);
 }
 
+.tiny-button.danger:hover {
+  color: var(--alert);
+}
+
+.tiny-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .empty-state {
   padding: 65px 24px;
   text-align: center;
@@ -552,6 +577,10 @@ h1 {
   width: min(620px, 100%);
 }
 
+.modal-networks {
+  width: min(780px, 100%);
+}
+
 .modal h2 {
   margin: 0;
   font: 500 28px Georgia, serif;
@@ -602,6 +631,101 @@ h1 {
 .field select:focus {
   border-color: var(--green-2);
   box-shadow: 0 0 0 3px rgba(35, 103, 75, 0.1);
+}
+
+.field-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+}
+
+.validation-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid #bcd7c7;
+  border-radius: 9px;
+  color: var(--green);
+  background: #f0f8f3;
+  font-size: 11px;
+}
+
+.validation-result span {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+}
+
+.modal-heading-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.modal-heading-row .modal-intro {
+  max-width: 520px;
+  margin-bottom: 18px;
+}
+
+.modal-heading-row .button {
+  flex: 0 0 auto;
+}
+
+.network-manager-list {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.network-manager-item {
+  min-height: 61px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.network-manager-item:last-child {
+  border-bottom: 0;
+}
+
+.network-manager-info {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.network-manager-info strong {
+  font-size: 13px;
+}
+
+.network-manager-info span {
+  overflow: hidden;
+  color: var(--muted);
+  font: 10px var(--font-geist-mono), monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network-editor {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafbf8;
+}
+
+.network-editor h3 {
+  margin: 0 0 18px;
+  font: 500 20px Georgia, serif;
+}
+
+.field input.color-input {
+  padding: 5px;
+  cursor: pointer;
 }
 
 .helper {
@@ -744,7 +868,7 @@ h1 {
   }
   .toolbar-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
   .account-grid {
     grid-template-columns: 1fr;
@@ -761,6 +885,25 @@ h1 {
   }
   .field-full {
     grid-column: auto;
+  }
+  .field-action-row {
+    grid-template-columns: 1fr;
+  }
+  .modal-heading-row {
+    display: grid;
+  }
+  .modal-heading-row .button {
+    width: 100%;
+  }
+  .network-manager-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .network-manager-item .network-kind {
+    display: none;
+  }
+  .network-manager-item .account-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-end;
   }
 }
 

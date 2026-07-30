@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "worker": "tsx scripts/worker.ts",
-    "test": "next build && node --test tests/rendered-html.test.mjs",
+    "test": "next build && tsx --test tests/*.test.mjs tests/*.test.ts",
     "lint": "eslint . --ignore-pattern .next"
   },
   "dependencies": {

@@ -5,12 +5,14 @@ import {
   listAccounts,
   type AccountRow,
 } from "./database";
+import { readErc20Balance, readNativeBalance } from "./evm";
 
 const MONITOR_LOCK_ID = 8_207_331;
 
 function formatUnits(value: bigint, decimals = 18) {
   const negative = value < 0n;
   const absolute = negative ? -value : value;
+  if (decimals === 0) return `${negative ? "-" : ""}${absolute}`;
   const raw = absolute.toString().padStart(decimals + 1, "0");
   const integer = raw.slice(0, -decimals);
   const fraction = raw.slice(-decimals).replace(/0+$/, "").slice(0, 8);
@@ -23,6 +25,7 @@ function toScaledInteger(value: string, decimals = 18) {
     throw new Error("Threshold must be a positive number.");
   }
   const [integer, fraction = ""] = clean.split(".");
+  if (decimals === 0) return BigInt(integer);
   return (
     BigInt(integer) * 10n ** BigInt(decimals) +
     BigInt(fraction.padEnd(decimals, "0").slice(0, decimals))
@@ -30,27 +33,20 @@ function toScaledInteger(value: string, decimals = 18) {
 }
 
 async function readBalance(account: AccountRow) {
-  const response = await fetch(account.rpc_url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_getBalance",
-      params: [account.address, "latest"],
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`RPC returned ${response.status}`);
-  const payload = (await response.json()) as {
-    result?: string;
-    error?: { message?: string };
-  };
-  if (!payload.result) {
-    throw new Error(payload.error?.message || "RPC returned no balance");
+  const decimals = account.asset_type === "erc20"
+    ? account.token_decimals
+    : 18;
+  if (decimals === null) {
+    throw new Error("ERC-20 token decimals are missing.");
   }
-  const wei = BigInt(payload.result);
-  return { wei, display: formatUnits(wei) };
+  const raw = account.asset_type === "erc20"
+    ? await readErc20Balance(
+        account.rpc_url,
+        account.token_address || "",
+        account.address
+      )
+    : await readNativeBalance(account.rpc_url, account.address);
+  return { raw, decimals, display: formatUnits(raw, decimals) };
 }
 
 async function sendTelegram(
@@ -65,6 +61,12 @@ async function sendTelegram(
     `Name: ${account.name}`,
     `Address: ${account.address}`,
     `Chain: ${account.chain_name}`,
+    ...(account.asset_type === "erc20"
+      ? [
+          `Token: ${account.token_name || account.symbol} (${account.symbol})`,
+          `Contract: ${account.token_address}`,
+        ]
+      : []),
     `Balance: ${balance} ${account.symbol}`,
     `Threshold: ${account.threshold} ${account.symbol}`,
   ].join("\n");
@@ -108,8 +110,8 @@ export async function runMonitor() {
 
     for (const account of accounts) {
       try {
-        const { wei, display } = await readBalance(account);
-        const isLow = wei < toScaledInteger(account.threshold);
+        const { raw, decimals, display } = await readBalance(account);
+        const isLow = raw < toScaledInteger(account.threshold, decimals);
         if (isLow) low += 1;
         checked += 1;
 

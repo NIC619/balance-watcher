@@ -1,7 +1,8 @@
 # Watchtower
 
-Watchtower monitors native balances for Ethereum-compatible accounts and sends
-Telegram alerts when an account crosses below its configured threshold.
+Watchtower monitors native and ERC-20 balances for Ethereum-compatible
+accounts and sends Telegram alerts when an account crosses below its configured
+threshold.
 
 ## Architecture
 
@@ -9,10 +10,41 @@ Telegram alerts when an account crosses below its configured threshold.
 - PostgreSQL for accounts, settings, and alert state
 - Independent 24/7 monitor worker
 - Single-owner authentication using an HTTP-only signed session cookie
+- On-chain ERC-20 contract and metadata validation
+- Editable built-in networks and validated custom EVM RPC networks
 
 The web service and worker share the same `DATABASE_URL`. A PostgreSQL advisory
 lock prevents an automatic worker check and a manual “Check now” request from
 running at the same time.
+
+## Using the dashboard
+
+### ERC-20 balances
+
+When adding or editing an account, choose **ERC-20 token**, select a network,
+and enter the token contract address. Click **Validate** before saving.
+Watchtower checks that the address has contract code and successfully responds
+to the ERC-20 `totalSupply()`, `balanceOf()`, and `decimals()` calls. It also
+reads the token name and symbol when available.
+
+Token contracts are network-specific. Duplicating an ERC-20 watch to another
+network succeeds only if the same contract address validates on the target
+network.
+
+### Networks
+
+Open **Manage networks** to add or edit networks. Enter the name, native token
+symbol, environment, color, and RPC URL. Watchtower calls `eth_chainId` through
+the RPC before saving:
+
+- New custom networks derive their chain ID from the RPC.
+- Editing a network requires the RPC to report the existing chain ID.
+- Built-in networks can be edited but not deleted.
+- Custom networks can be deleted when no watched accounts use them.
+
+Network configuration and token metadata are persisted in PostgreSQL. Existing
+installations migrate automatically on the first request or worker cycle after
+deployment.
 
 ## Local development
 
