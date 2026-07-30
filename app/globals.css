@@ -290,6 +290,11 @@ h1 {
   background: var(--card);
 }
 
+.network-section.network-testnet {
+  border-color: #d9c89c;
+  box-shadow: inset 3px 0 0 #d39a36;
+}
+
 .network-header {
   min-height: 54px;
   padding: 0 18px;
@@ -298,6 +303,13 @@ h1 {
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
   background: #fafbf8;
+}
+
+.network-testnet .network-header {
+  background:
+    repeating-linear-gradient(-45deg, rgba(184, 107, 45, 0.035) 0 7px, transparent 7px 14px),
+    #fffbf1;
+  border-bottom-color: #e7d9b7;
 }
 
 .network-label {
@@ -321,6 +333,27 @@ h1 {
 .chain-id {
   color: var(--muted);
   font: 11px var(--font-geist-mono), monospace;
+}
+
+.network-kind {
+  padding: 4px 7px;
+  border-radius: 99px;
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.network-kind.mainnet {
+  color: var(--green);
+  background: var(--mint);
+}
+
+.network-kind.testnet {
+  color: #85521b;
+  background: #f6e5b9;
+  border: 1px solid #e9cf8c;
 }
 
 .account-grid {

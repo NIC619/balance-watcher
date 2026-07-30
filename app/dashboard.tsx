@@ -21,6 +21,7 @@ type Network = {
   symbol: string;
   rpcUrl: string;
   color: string;
+  environment: "mainnet" | "testnet";
 };
 
 type Settings = {
@@ -120,7 +121,11 @@ export function Dashboard() {
         network: data.networks.find((network) => network.chainId === chainId),
         accounts,
       }))
-      .sort((a, b) => (a.network?.name || "").localeCompare(b.network?.name || ""));
+      .sort((a, b) => {
+        const environmentOrder = (a.network?.environment === "testnet" ? 1 : 0)
+          - (b.network?.environment === "testnet" ? 1 : 0);
+        return environmentOrder || (a.network?.name || "").localeCompare(b.network?.name || "");
+      });
   }, [data]);
 
   const lowCount = data?.accounts.filter((account) => account.status === "low").length || 0;
@@ -297,7 +302,10 @@ export function Dashboard() {
             </div>
           ) : (
             grouped.map(({ network, accounts }) => (
-              <div className="network-section" key={accounts[0].chain_id}>
+              <div
+                className={`network-section ${network?.environment === "testnet" ? "network-testnet" : "network-mainnet"}`}
+                key={accounts[0].chain_id}
+              >
                 <div className="network-header">
                   <div className="network-label">
                     <span className="network-glyph" style={{ "--network-color": network?.color } as React.CSSProperties}>
@@ -305,6 +313,9 @@ export function Dashboard() {
                     </span>
                     {network?.name || accounts[0].chain_name}
                     <span className="chain-id">#{accounts[0].chain_id}</span>
+                    <span className={`network-kind ${network?.environment || "mainnet"}`}>
+                      {network?.environment === "testnet" ? "Testnet" : "Mainnet"}
+                    </span>
                   </div>
                   <span className="chain-id">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
                 </div>
@@ -425,7 +436,9 @@ export function Dashboard() {
                   onChange={(event) => setAccountDraft({ ...accountDraft, chainId: event.target.value })}
                 >
                   {data.networks.map((network) => (
-                    <option value={network.chainId} key={network.chainId}>{network.name}</option>
+                    <option value={network.chainId} key={network.chainId}>
+                      {network.name} · {network.environment === "testnet" ? "Testnet" : "Mainnet"}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -472,7 +485,9 @@ export function Dashboard() {
                 {data.networks
                   .filter((network) => network.chainId !== duplicate.account.chain_id)
                   .map((network) => (
-                    <option value={network.chainId} key={network.chainId}>{network.name}</option>
+                    <option value={network.chainId} key={network.chainId}>
+                      {network.name} · {network.environment === "testnet" ? "Testnet" : "Mainnet"}
+                    </option>
                   ))}
               </select>
             </div>
