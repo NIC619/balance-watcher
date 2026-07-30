@@ -46,17 +46,17 @@ Create one Railway project with:
 2. A web service connected to this repository.
 3. A worker service connected to the same repository.
 
+In each service's settings, select its custom Railway config file:
+
+- Web: `/railway.web.toml`
+- Worker: `/railway.worker.toml`
+
 Set these variables on both application services:
 
 - `DATABASE_URL=${{Postgres.DATABASE_URL}}`
 - `APP_USERNAME`
 - `APP_PASSWORD`
-- `AUTH_SECRET`
-
-Use the default build command `npm run build`.
-
-- Web start command: `npm run start`
-- Worker start command: `npm run worker`
+- `AUTH_SECRET` (generate with `openssl rand -base64 48`)
 
 Expose a public domain only for the web service. The worker needs no public
 domain. The monitor interval is controlled from Telegram settings in the UI.
