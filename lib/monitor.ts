@@ -2,8 +2,8 @@ import {
   ensureDatabase,
   getDb,
   getSettings,
-  listAccounts,
-  type AccountRow,
+  listMonitoredAssets,
+  type MonitoredAssetRow,
 } from "./database";
 import { readErc20Balance, readNativeBalance } from "./evm";
 
@@ -32,43 +32,43 @@ function toScaledInteger(value: string, decimals = 18) {
   );
 }
 
-async function readBalance(account: AccountRow) {
-  const decimals = account.asset_type === "erc20"
-    ? account.token_decimals
+async function readBalance(asset: MonitoredAssetRow) {
+  const decimals = asset.asset_type === "erc20"
+    ? asset.token_decimals
     : 18;
   if (decimals === null) {
     throw new Error("ERC-20 token decimals are missing.");
   }
-  const raw = account.asset_type === "erc20"
+  const raw = asset.asset_type === "erc20"
     ? await readErc20Balance(
-        account.rpc_url,
-        account.token_address || "",
-        account.address
+        asset.rpc_url,
+        asset.token_address || "",
+        asset.address
       )
-    : await readNativeBalance(account.rpc_url, account.address);
+    : await readNativeBalance(asset.rpc_url, asset.address);
   return { raw, decimals, display: formatUnits(raw, decimals) };
 }
 
 async function sendTelegram(
   token: string,
   chatId: string,
-  account: AccountRow,
+  asset: MonitoredAssetRow,
   balance: string
 ) {
   const message = [
     "⚠️ Low balance alert",
     "",
-    `Name: ${account.name}`,
-    `Address: ${account.address}`,
-    `Chain: ${account.chain_name}`,
-    ...(account.asset_type === "erc20"
+    `Name: ${asset.name}`,
+    `Address: ${asset.address}`,
+    `Chain: ${asset.chain_name}`,
+    ...(asset.asset_type === "erc20"
       ? [
-          `Token: ${account.token_name || account.symbol} (${account.symbol})`,
-          `Contract: ${account.token_address}`,
+          `Token: ${asset.token_name || asset.symbol} (${asset.symbol})`,
+          `Contract: ${asset.token_address}`,
         ]
       : []),
-    `Balance: ${balance} ${account.symbol}`,
-    `Threshold: ${account.threshold} ${account.symbol}`,
+    `Balance: ${balance} ${asset.symbol}`,
+    `Threshold: ${asset.threshold} ${asset.symbol}`,
   ].join("\n");
 
   const response = await fetch(
@@ -99,8 +99,8 @@ export async function runMonitor() {
       return { checked: 0, low: 0, failed: 0, notified: 0, skipped: true };
     }
 
-    const [accounts, settings] = await Promise.all([
-      listAccounts(client),
+    const [assets, settings] = await Promise.all([
+      listMonitoredAssets(client),
       getSettings(client),
     ]);
     let low = 0;
@@ -108,25 +108,25 @@ export async function runMonitor() {
     let failed = 0;
     let notified = 0;
 
-    for (const account of accounts) {
+    for (const asset of assets) {
       try {
-        const { raw, decimals, display } = await readBalance(account);
-        const isLow = raw < toScaledInteger(account.threshold, decimals);
+        const { raw, decimals, display } = await readBalance(asset);
+        const isLow = raw < toScaledInteger(asset.threshold, decimals);
         if (isLow) low += 1;
         checked += 1;
 
-        let alertActive = account.alert_active;
-        let lastAlertAt = account.last_alert_at;
+        let alertActive = asset.alert_active;
+        let lastAlertAt = asset.last_alert_at;
         if (
           isLow &&
-          !account.alert_active &&
+          !asset.alert_active &&
           settings?.telegram_bot_token &&
           settings.telegram_chat_id
         ) {
           await sendTelegram(
             settings.telegram_bot_token,
             settings.telegram_chat_id,
-            account,
+            asset,
             display
           );
           alertActive = true;
@@ -137,9 +137,10 @@ export async function runMonitor() {
         }
 
         await client.query(
-          `UPDATE watched_accounts
+          `UPDATE watched_assets
            SET balance = $1, status = $2, last_checked_at = $3,
-               alert_active = $4, last_alert_at = $5
+               alert_active = $4, last_alert_at = $5,
+               updated_at = CURRENT_TIMESTAMP
            WHERE id = $6`,
           [
             display,
@@ -147,15 +148,18 @@ export async function runMonitor() {
             new Date().toISOString(),
             alertActive,
             lastAlertAt,
-            account.id,
+            asset.id,
           ]
         );
       } catch (error) {
         failed += 1;
-        console.error(`Balance check failed for account ${account.id}:`, error);
+        console.error(`Balance check failed for asset ${asset.id}:`, error);
         await client.query(
-          "UPDATE watched_accounts SET status = $1, last_checked_at = $2 WHERE id = $3",
-          ["error", new Date().toISOString(), account.id]
+          `UPDATE watched_assets
+           SET status = $1, last_checked_at = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3`,
+          ["error", new Date().toISOString(), asset.id]
         );
       }
     }

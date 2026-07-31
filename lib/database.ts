@@ -1,14 +1,18 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { NETWORK_PRESETS } from "./networks";
 
-export type AccountRow = {
+export type WalletRow = {
   id: number;
   name: string;
   address: string;
   chain_id: number;
-  chain_name: string;
-  symbol: string;
-  rpc_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssetRow = {
+  id: number;
+  wallet_id: number;
   asset_type: "native" | "erc20";
   token_address: string | null;
   token_name: string | null;
@@ -21,6 +25,20 @@ export type AccountRow = {
   last_alert_at: string | null;
   alert_active: boolean;
   created_at: string;
+  updated_at: string;
+};
+
+export type MonitoredAssetRow = AssetRow & {
+  name: string;
+  address: string;
+  chain_id: number;
+  chain_name: string;
+  symbol: string;
+  rpc_url: string;
+};
+
+export type WalletWithAssets = WalletRow & {
+  assets: AssetRow[];
 };
 
 export type NetworkRow = {
@@ -98,14 +116,20 @@ async function initializeSchema(db: Queryable) {
     );
   }
   await db.query(`
-    CREATE TABLE IF NOT EXISTS watched_accounts (
+    CREATE TABLE IF NOT EXISTS watched_wallets (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       address TEXT NOT NULL,
-      chain_id INTEGER NOT NULL,
-      chain_name TEXT NOT NULL,
-      symbol TEXT NOT NULL DEFAULT 'ETH',
-      rpc_url TEXT NOT NULL,
+      chain_id INTEGER NOT NULL REFERENCES networks(chain_id) ON DELETE RESTRICT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (chain_id, address)
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS watched_assets (
+      id SERIAL PRIMARY KEY,
+      wallet_id INTEGER NOT NULL REFERENCES watched_wallets(id) ON DELETE CASCADE,
       asset_type TEXT NOT NULL DEFAULT 'native',
       token_address TEXT,
       token_name TEXT,
@@ -117,23 +141,24 @@ async function initializeSchema(db: Queryable) {
       last_checked_at TIMESTAMPTZ,
       last_alert_at TIMESTAMPTZ,
       alert_active BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
   await db.query(
-    "ALTER TABLE watched_accounts ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'native'"
+    `CREATE UNIQUE INDEX IF NOT EXISTS watched_assets_native_unique
+     ON watched_assets (wallet_id) WHERE asset_type = 'native'`
   );
   await db.query(
-    "ALTER TABLE watched_accounts ADD COLUMN IF NOT EXISTS token_address TEXT"
+    `CREATE UNIQUE INDEX IF NOT EXISTS watched_assets_token_unique
+     ON watched_assets (wallet_id, LOWER(token_address))
+     WHERE asset_type = 'erc20'`
   );
   await db.query(
-    "ALTER TABLE watched_accounts ADD COLUMN IF NOT EXISTS token_name TEXT"
+    "CREATE INDEX IF NOT EXISTS watched_wallets_chain_idx ON watched_wallets (chain_id, name)"
   );
   await db.query(
-    "ALTER TABLE watched_accounts ADD COLUMN IF NOT EXISTS token_symbol TEXT"
-  );
-  await db.query(
-    "ALTER TABLE watched_accounts ADD COLUMN IF NOT EXISTS token_decimals INTEGER"
+    "CREATE INDEX IF NOT EXISTS watched_assets_wallet_idx ON watched_assets (wallet_id)"
   );
   await db.query(`
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -145,11 +170,56 @@ async function initializeSchema(db: Queryable) {
     )
   `);
   await db.query(
-    "CREATE INDEX IF NOT EXISTS watched_accounts_chain_idx ON watched_accounts (chain_id, name)"
-  );
-  await db.query(
     "INSERT INTO app_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
   );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS app_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const migrationName = "normalize_wallet_assets_v1";
+  const migration = await db.query<{ applied: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM app_migrations WHERE name = $1) AS applied",
+    [migrationName]
+  );
+  if (!migration.rows[0]?.applied) {
+    const legacy = await db.query<{ exists: boolean }>(
+      "SELECT to_regclass('public.watched_accounts') IS NOT NULL AS exists"
+    );
+    if (legacy.rows[0]?.exists) {
+      await db.query(`
+        INSERT INTO watched_wallets (name, address, chain_id, created_at)
+        SELECT DISTINCT ON (chain_id, LOWER(address))
+          name, LOWER(address), chain_id, created_at
+        FROM watched_accounts
+        ORDER BY chain_id, LOWER(address), id
+        ON CONFLICT (chain_id, address) DO NOTHING
+      `);
+      await db.query(`
+        INSERT INTO watched_assets
+          (wallet_id, asset_type, token_address, token_name, token_symbol,
+           token_decimals, threshold, balance, status, last_checked_at,
+           last_alert_at, alert_active, created_at)
+        SELECT wallet.id, account.asset_type, LOWER(account.token_address),
+               account.token_name, account.token_symbol,
+               account.token_decimals, account.threshold, account.balance,
+               account.status, account.last_checked_at, account.last_alert_at,
+               account.alert_active, account.created_at
+        FROM watched_accounts AS account
+        JOIN watched_wallets AS wallet
+          ON wallet.chain_id = account.chain_id
+         AND wallet.address = LOWER(account.address)
+        ORDER BY account.id
+        ON CONFLICT DO NOTHING
+      `);
+    }
+    await db.query(
+      "INSERT INTO app_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING",
+      [migrationName]
+    );
+  }
 }
 
 export async function ensureDatabase(db: Queryable = getDb()) {
@@ -162,21 +232,50 @@ export async function ensureDatabase(db: Queryable = getDb()) {
   await global.watchtowerSchemaPromise;
 }
 
-export async function listAccounts(db: Queryable = getDb()) {
+export async function listWallets(db: Queryable = getDb()) {
   await ensureDatabase(db);
-  await db.query(`
-    UPDATE watched_accounts AS account
-    SET chain_name = network.name,
-        rpc_url = network.rpc_url,
-        symbol = CASE
-          WHEN account.asset_type = 'native' THEN network.native_symbol
-          ELSE COALESCE(account.token_symbol, account.symbol)
-        END
-    FROM networks AS network
-    WHERE account.chain_id = network.chain_id
-  `);
-  const result = await db.query<AccountRow>(
-    "SELECT * FROM watched_accounts ORDER BY chain_name ASC, name ASC"
+  const [walletResult, assetResult] = await Promise.all([
+    db.query<WalletRow>(
+      `SELECT wallet.*
+       FROM watched_wallets AS wallet
+       JOIN networks AS network ON network.chain_id = wallet.chain_id
+       ORDER BY CASE WHEN network.environment = 'mainnet' THEN 0 ELSE 1 END,
+                network.name ASC, wallet.name ASC`
+    ),
+    db.query<AssetRow>(
+      `SELECT * FROM watched_assets
+       ORDER BY wallet_id,
+                CASE WHEN asset_type = 'native' THEN 0 ELSE 1 END,
+                token_symbol ASC`
+    ),
+  ]);
+  const assetsByWallet = new Map<number, AssetRow[]>();
+  for (const asset of assetResult.rows) {
+    const assets = assetsByWallet.get(asset.wallet_id) || [];
+    assets.push(asset);
+    assetsByWallet.set(asset.wallet_id, assets);
+  }
+  return walletResult.rows.map((wallet) => ({
+    ...wallet,
+    assets: assetsByWallet.get(wallet.id) || [],
+  }));
+}
+
+export async function listMonitoredAssets(db: Queryable = getDb()) {
+  await ensureDatabase(db);
+  const result = await db.query<MonitoredAssetRow>(
+    `SELECT asset.*, wallet.name, wallet.address, wallet.chain_id,
+            network.name AS chain_name, network.rpc_url,
+            CASE
+              WHEN asset.asset_type = 'native' THEN network.native_symbol
+              ELSE COALESCE(asset.token_symbol, 'TOKEN')
+            END AS symbol
+     FROM watched_assets AS asset
+     JOIN watched_wallets AS wallet ON wallet.id = asset.wallet_id
+     JOIN networks AS network ON network.chain_id = wallet.chain_id
+     ORDER BY network.name ASC, wallet.name ASC,
+              CASE WHEN asset.asset_type = 'native' THEN 0 ELSE 1 END,
+              asset.token_symbol ASC`
   );
   return result.rows;
 }

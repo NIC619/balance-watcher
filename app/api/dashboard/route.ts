@@ -1,6 +1,6 @@
 import {
   getSettings,
-  listAccounts,
+  listWallets,
   listNetworks,
 } from "../../../lib/database";
 import {
@@ -10,13 +10,27 @@ import {
 
 export async function GET(request: Request) {
   if (!requestIsAuthenticated(request)) return unauthorizedResponse();
-  const [accounts, settings, networks] = await Promise.all([
-    listAccounts(),
+  const [wallets, settings, networks] = await Promise.all([
+    listWallets(),
     getSettings(),
     listNetworks(),
   ]);
   return Response.json({
-    accounts,
+    wallets: wallets.map((wallet) => {
+      const network = networks.find(
+        (item) => item.chain_id === wallet.chain_id
+      );
+      return {
+        ...wallet,
+        chain_name: network?.name || `Chain ${wallet.chain_id}`,
+        assets: wallet.assets.map((asset) => ({
+          ...asset,
+          symbol: asset.asset_type === "native"
+            ? network?.native_symbol || "NATIVE"
+            : asset.token_symbol || "TOKEN",
+        })),
+      };
+    }),
     settings: settings
       ? {
           telegramBotToken: settings.telegram_bot_token ? "••••••••••••" : "",

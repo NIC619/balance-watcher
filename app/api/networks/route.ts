@@ -44,11 +44,11 @@ export async function POST(request: Request) {
         throw new Error("Built-in networks can be edited but not deleted.");
       }
       const usage = await db.query<{ count: string }>(
-        "SELECT COUNT(*)::text AS count FROM watched_accounts WHERE chain_id = $1",
+        "SELECT COUNT(*)::text AS count FROM watched_wallets WHERE chain_id = $1",
         [chainId]
       );
       if (Number(usage.rows[0]?.count || 0) > 0) {
-        throw new Error("Remove or move watched accounts before deleting this network.");
+        throw new Error("Remove or move watched wallets before deleting this network.");
       }
       await db.query("DELETE FROM networks WHERE chain_id = $1", [chainId]);
       return Response.json({ ok: true });

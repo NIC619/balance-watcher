@@ -1,13 +1,12 @@
 # Watchtower
 
-Watchtower monitors native and ERC-20 balances for Ethereum-compatible
-accounts and sends Telegram alerts when an account crosses below its configured
-threshold.
+Watchtower monitors native and ERC-20 balances for Ethereum-compatible wallets
+and sends Telegram alerts when an asset crosses below its configured threshold.
 
 ## Architecture
 
 - Next.js web dashboard and API
-- PostgreSQL for accounts, settings, and alert state
+- PostgreSQL for wallets, watched assets, settings, and alert state
 - Independent 24/7 monitor worker
 - Single-owner authentication using an HTTP-only signed session cookie
 - On-chain ERC-20 contract and metadata validation
@@ -21,8 +20,13 @@ running at the same time.
 
 ### ERC-20 balances
 
-When adding or editing an account, choose **ERC-20 token**, select a network,
-and enter the token contract address. Click **Validate** before saving.
+Each card represents one address on one network and contains all assets watched
+for that wallet. In the wallet editor, use **+ Native** or **+ ERC-20** to add
+assets and **Remove** to stop watching an individual asset. The whole wallet and
+asset list are saved in one database transaction.
+
+For an ERC-20 asset, enter the token contract address and click **Validate**
+before saving.
 Watchtower checks that the address has contract code and successfully responds
 to the ERC-20 `totalSupply()`, `balanceOf()`, and `decimals()` calls. It also
 reads the token name and symbol when available.
@@ -40,11 +44,13 @@ the RPC before saving:
 - New custom networks derive their chain ID from the RPC.
 - Editing a network requires the RPC to report the existing chain ID.
 - Built-in networks can be edited but not deleted.
-- Custom networks can be deleted when no watched accounts use them.
+- Custom networks can be deleted when no watched wallets use them.
 
 Network configuration and token metadata are persisted in PostgreSQL. Existing
-installations migrate automatically on the first request or worker cycle after
-deployment.
+flat account rows migrate automatically into `watched_wallets` and
+`watched_assets` on the first request or worker cycle after deployment. Rows
+with the same network and address become one wallet card without losing their
+individual thresholds, balance state, or alert state.
 
 ## Local development
 

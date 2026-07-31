@@ -2,12 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Account = {
+type Asset = {
   id: number;
-  name: string;
-  address: string;
-  chain_id: number;
-  chain_name: string;
   symbol: string;
   asset_type: "native" | "erc20";
   token_address: string | null;
@@ -18,6 +14,15 @@ type Account = {
   balance: string | null;
   status: "healthy" | "low" | "pending" | "error";
   last_checked_at: string | null;
+};
+
+type Wallet = {
+  id: number;
+  name: string;
+  address: string;
+  chain_id: number;
+  chain_name: string;
+  assets: Asset[];
 };
 
 type Network = {
@@ -38,20 +43,25 @@ type Settings = {
 };
 
 type DashboardData = {
-  accounts: Account[];
+  wallets: Wallet[];
   networks: Network[];
   settings: Settings;
 };
 
-type AccountDraft = {
+type AssetDraft = {
   id?: number;
-  name: string;
-  address: string;
-  chainId: string;
   assetType: "native" | "erc20";
   tokenAddress: string;
   token: TokenMetadata | null;
   threshold: string;
+};
+
+type WalletDraft = {
+  id?: number;
+  name: string;
+  address: string;
+  chainId: string;
+  assets: AssetDraft[];
 };
 
 type TokenMetadata = {
@@ -71,14 +81,18 @@ type NetworkDraft = {
   color: string;
 };
 
-const emptyAccount: AccountDraft = {
+const emptyWallet: WalletDraft = {
   name: "",
   address: "",
   chainId: "1",
-  assetType: "native",
-  tokenAddress: "",
-  token: null,
-  threshold: "0.05",
+  assets: [
+    {
+      assetType: "native",
+      tokenAddress: "",
+      token: null,
+      threshold: "0.05",
+    },
+  ],
 };
 
 const emptyNetwork: NetworkDraft = {
@@ -118,10 +132,65 @@ function rpcHostname(rpcUrl: string) {
   }
 }
 
+const statusPriority: Record<Asset["status"], number> = {
+  healthy: 0,
+  pending: 1,
+  low: 2,
+  error: 3,
+};
+
+function statusLabel(status: Asset["status"]) {
+  if (status === "low") return "Low balance";
+  if (status === "healthy") return "Healthy";
+  if (status === "error") return "Check failed";
+  return "Pending";
+}
+
+function walletStatus(wallet: Wallet): Asset["status"] {
+  return wallet.assets.reduce<Asset["status"]>(
+    (worst, asset) =>
+      statusPriority[asset.status] > statusPriority[worst] ? asset.status : worst,
+    "healthy"
+  );
+}
+
+function walletToDraft(wallet: Wallet): WalletDraft {
+  return {
+    id: wallet.id,
+    name: wallet.name,
+    address: wallet.address,
+    chainId: String(wallet.chain_id),
+    assets: wallet.assets.map((asset) => ({
+      id: asset.id,
+      assetType: asset.asset_type,
+      tokenAddress: asset.token_address || "",
+      token:
+        asset.asset_type === "erc20" && asset.token_address
+          ? {
+              address: asset.token_address,
+              name: asset.token_name || asset.symbol,
+              symbol: asset.token_symbol || asset.symbol,
+              decimals: asset.token_decimals ?? 18,
+              chainId: wallet.chain_id,
+            }
+          : null,
+      threshold: asset.threshold,
+    })),
+  };
+}
+
+function newWalletDraft(chainId: number): WalletDraft {
+  return {
+    ...emptyWallet,
+    chainId: String(chainId),
+    assets: emptyWallet.assets.map((asset) => ({ ...asset })),
+  };
+}
+
 export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [accountDraft, setAccountDraft] = useState<AccountDraft | null>(null);
-  const [duplicate, setDuplicate] = useState<{ account: Account; chainId: string } | null>(null);
+  const [walletDraft, setWalletDraft] = useState<WalletDraft | null>(null);
+  const [duplicate, setDuplicate] = useState<{ wallet: Wallet; chainId: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
   const [networksOpen, setNetworksOpen] = useState(false);
@@ -159,16 +228,16 @@ export function Dashboard() {
 
   const grouped = useMemo(() => {
     if (!data) return [];
-    const groups = new Map<number, Account[]>();
-    for (const account of data.accounts) {
-      const group = groups.get(account.chain_id) || [];
-      group.push(account);
-      groups.set(account.chain_id, group);
+    const groups = new Map<number, Wallet[]>();
+    for (const wallet of data.wallets) {
+      const group = groups.get(wallet.chain_id) || [];
+      group.push(wallet);
+      groups.set(wallet.chain_id, group);
     }
     return [...groups.entries()]
-      .map(([chainId, accounts]) => ({
+      .map(([chainId, wallets]) => ({
         network: data.networks.find((network) => network.chainId === chainId),
-        accounts,
+        wallets,
       }))
       .sort((a, b) => {
         const environmentOrder = (a.network?.environment === "testnet" ? 1 : 0)
@@ -177,8 +246,8 @@ export function Dashboard() {
       });
   }, [data]);
 
-  const lowCount = data?.accounts.filter((account) => account.status === "low").length || 0;
-  const healthyCount = data?.accounts.filter((account) => account.status === "healthy").length || 0;
+  const assets = data?.wallets.flatMap((wallet) => wallet.assets) || [];
+  const lowCount = assets.filter((asset) => asset.status === "low").length;
 
   async function mutate(body: Record<string, unknown>, successMessage: string) {
     setBusy(true);
@@ -200,38 +269,44 @@ export function Dashboard() {
     }
   }
 
-  async function saveAccount(event: React.FormEvent) {
+  async function saveWallet(event: React.FormEvent) {
     event.preventDefault();
-    if (!accountDraft) return;
-    if (accountDraft.assetType === "erc20" && !accountDraft.token) {
-      notify("Validate the ERC-20 token before saving.", true);
+    if (!walletDraft) return;
+    if (
+      walletDraft.assets.some(
+        (asset) => asset.assetType === "erc20" && !asset.token
+      )
+    ) {
+      notify("Validate every ERC-20 token before saving.", true);
       return;
     }
     try {
       await mutate(
         {
-          action: accountDraft.id ? "update" : "create",
-          ...accountDraft,
-          chainId: Number(accountDraft.chainId),
+          action: "save",
+          ...walletDraft,
+          chainId: Number(walletDraft.chainId),
         },
-        accountDraft.id ? "Account updated." : "Account added."
+        walletDraft.id ? "Watched wallet updated." : "Watched wallet added."
       );
-      setAccountDraft(null);
+      setWalletDraft(null);
     } catch {
       // The inline toast already explains the validation error.
     }
   }
 
-  async function validateToken() {
-    if (!accountDraft) return;
+  async function validateToken(assetIndex: number) {
+    if (!walletDraft) return;
+    const asset = walletDraft.assets[assetIndex];
+    if (!asset) return;
     setBusy(true);
     try {
       const response = await fetch("/api/tokens/validate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          chainId: Number(accountDraft.chainId),
-          tokenAddress: accountDraft.tokenAddress,
+          chainId: Number(walletDraft.chainId),
+          tokenAddress: asset.tokenAddress,
         }),
       });
       const payload = (await response.json()) as {
@@ -241,14 +316,18 @@ export function Dashboard() {
       if (!response.ok || !payload.token) {
         throw new Error(payload.error || "Could not validate token.");
       }
-      setAccountDraft({
-        ...accountDraft,
+      const nextAssets = [...walletDraft.assets];
+      nextAssets[assetIndex] = {
+        ...asset,
         tokenAddress: payload.token.address,
-        token: { ...payload.token, chainId: Number(accountDraft.chainId) },
-      });
+        token: { ...payload.token, chainId: Number(walletDraft.chainId) },
+      };
+      setWalletDraft({ ...walletDraft, assets: nextAssets });
       notify(`${payload.token.name} (${payload.token.symbol}) validated.`);
     } catch (error) {
-      setAccountDraft({ ...accountDraft, token: null });
+      const nextAssets = [...walletDraft.assets];
+      nextAssets[assetIndex] = { ...asset, token: null };
+      setWalletDraft({ ...walletDraft, assets: nextAssets });
       notify(error instanceof Error ? error.message : "Could not validate token.", true);
     } finally {
       setBusy(false);
@@ -322,7 +401,7 @@ export function Dashboard() {
       await load();
       const detail = payload.failed
         ? `${payload.checked} checked, ${payload.failed} failed.`
-        : `${payload.checked} account${payload.checked === 1 ? "" : "s"} checked.`;
+        : `${payload.checked} asset${payload.checked === 1 ? "" : "s"} checked.`;
       notify(`${detail}${payload.notified ? ` ${payload.notified} alert sent.` : ""}`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Balance check failed.", true);
@@ -398,25 +477,20 @@ export function Dashboard() {
           </div>
           <button
             className="button button-primary"
-            onClick={() =>
-              setAccountDraft({
-                ...emptyAccount,
-                chainId: String(data?.networks[0]?.chainId || 1),
-              })
-            }
+            onClick={() => setWalletDraft(newWalletDraft(data?.networks[0]?.chainId || 1))}
           >
-            <span>＋</span> Add account
+            <span>＋</span> Add wallet
           </button>
         </section>
 
         <section className="summary-grid" aria-label="Monitoring summary">
           <div className="summary-item">
-            <span className="summary-label">Accounts watched</span>
-            <span className="summary-value">{data?.accounts.length ?? "—"}</span>
+            <span className="summary-label">Addresses watched</span>
+            <span className="summary-value">{data?.wallets.length ?? "—"}</span>
           </div>
           <div className="summary-item">
-            <span className="summary-label">Healthy balances</span>
-            <span className="summary-value">{data ? healthyCount : "—"}</span>
+            <span className="summary-label">Assets watched</span>
+            <span className="summary-value">{data ? assets.length : "—"}</span>
           </div>
           <div className="summary-item">
             <span className="summary-label">Below threshold</span>
@@ -427,8 +501,8 @@ export function Dashboard() {
         <section>
           <div className="toolbar">
             <div className="section-title">
-              <h2>Watched accounts</h2>
-              <span className="count-pill">{data?.accounts.length || 0}</span>
+              <h2>Watched wallets</h2>
+              <span className="count-pill">{data?.wallets.length || 0}</span>
             </div>
             <div className="toolbar-actions">
               <button
@@ -452,88 +526,89 @@ export function Dashboard() {
               <h3>Loading your watchlist</h3>
               <p>Connecting to the monitor…</p>
             </div>
-          ) : data.accounts.length === 0 ? (
+          ) : data.wallets.length === 0 ? (
             <div className="empty-state">
               <div className="empty-mark">＋</div>
-              <h3>No accounts yet</h3>
-              <p>Add your first account and set the balance that should trigger an alert.</p>
+              <h3>No wallets yet</h3>
+              <p>Add your first wallet, choose its assets, and set their alert thresholds.</p>
               <button
                 className="button button-primary"
-                onClick={() =>
-                  setAccountDraft({
-                    ...emptyAccount,
-                    chainId: String(data.networks[0]?.chainId || 1),
-                  })
-                }
+                onClick={() => setWalletDraft(newWalletDraft(data.networks[0]?.chainId || 1))}
               >
-                Add your first account
+                Add your first wallet
               </button>
             </div>
           ) : (
-            grouped.map(({ network, accounts }) => (
+            grouped.map(({ network, wallets }) => (
               <div
                 className={`network-section ${network?.environment === "testnet" ? "network-testnet" : "network-mainnet"}`}
-                key={accounts[0].chain_id}
+                key={wallets[0].chain_id}
               >
                 <div className="network-header">
                   <div className="network-label">
                     <span className="network-glyph" style={{ "--network-color": network?.color } as React.CSSProperties}>
                       {network?.name.slice(0, 2).toUpperCase() || "EV"}
                     </span>
-                    {network?.name || accounts[0].chain_name}
-                    <span className="chain-id">#{accounts[0].chain_id}</span>
+                    {network?.name || wallets[0].chain_name}
+                    <span className="chain-id">#{wallets[0].chain_id}</span>
                     <span className={`network-kind ${network?.environment || "mainnet"}`}>
                       {network?.environment === "testnet" ? "Testnet" : "Mainnet"}
                     </span>
                   </div>
-                  <span className="chain-id">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
+                  <span className="chain-id">
+                    {wallets.length} address{wallets.length === 1 ? "" : "es"} ·{" "}
+                    {wallets.reduce((total, wallet) => total + wallet.assets.length, 0)} assets
+                  </span>
                 </div>
                 <div className="account-grid">
-                  {accounts.map((account) => (
-                    <article className="account-card" key={account.id}>
+                  {wallets.map((wallet) => {
+                    const overallStatus = walletStatus(wallet);
+                    return (
+                    <article className="account-card wallet-card" key={wallet.id}>
                       <div className="account-head">
                         <div>
-                          <div className="account-name">{account.name}</div>
-                          <div className="account-address" title={account.address}>{shortenAddress(account.address)}</div>
-                          {account.asset_type === "erc20" && (
-                            <div
-                              className="asset-label"
-                              title={account.token_address || undefined}
-                            >
-                              Token · {account.token_name || account.symbol}
-                              <span>{account.token_address ? shortenAddress(account.token_address) : ""}</span>
-                            </div>
-                          )}
+                          <div className="account-name">{wallet.name}</div>
+                          <div className="account-address" title={wallet.address}>{shortenAddress(wallet.address)}</div>
                         </div>
-                        <span className={`status-pill ${account.status}`}>
-                          {account.status === "low"
-                            ? "Low balance"
-                            : account.status === "healthy"
-                              ? "Healthy"
-                              : account.status === "error"
-                                ? "Check failed"
-                                : "Pending"}
+                        <span className={`status-pill ${overallStatus}`}>
+                          {statusLabel(overallStatus)}
                         </span>
                       </div>
-                      <div className="balance-line">
-                        <div className="balance">
-                          {displayBalance(account.balance)}
-                          <span className="balance-symbol">{account.symbol}</span>
-                        </div>
-                        <div className="threshold">
-                          Alert below
-                          <strong>{account.threshold} {account.symbol}</strong>
-                        </div>
+                      <div className="wallet-assets">
+                        {wallet.assets.map((asset) => (
+                          <div className="wallet-asset-row" key={asset.id}>
+                            <div className="asset-main">
+                              <strong>
+                                {asset.asset_type === "native"
+                                  ? `${asset.symbol} · Native`
+                                  : `${asset.token_name || asset.symbol} · ${asset.symbol}`}
+                              </strong>
+                              {asset.token_address && (
+                                <span title={asset.token_address}>{shortenAddress(asset.token_address)}</span>
+                              )}
+                              <span className="checked">{formatChecked(asset.last_checked_at)}</span>
+                            </div>
+                            <div className="asset-balance">
+                              {displayBalance(asset.balance)} <span>{asset.symbol}</span>
+                            </div>
+                            <div className="asset-threshold">
+                              Alert below <strong>{asset.threshold} {asset.symbol}</strong>
+                            </div>
+                            <span className={`status-pill asset-status ${asset.status}`}>
+                              {statusLabel(asset.status)}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                      <div className="account-meta">
-                        <span className="checked">{formatChecked(account.last_checked_at)}</span>
+                      <div className="account-meta wallet-footer">
+                        <span className="checked">{wallet.assets.length} asset{wallet.assets.length === 1 ? "" : "s"} monitored</span>
                         <div className="account-actions">
                           <button
                             className="tiny-button"
                             onClick={() =>
                               setDuplicate({
-                                account,
-                                chainId: String(data.networks.find((item) => item.chainId !== account.chain_id)?.chainId || 1),
+                                wallet,
+                                chainId: String(data.networks.find((item) => item.chainId !== wallet.chain_id)?.chainId || wallet.chain_id),
                               })
                             }
                           >
@@ -541,34 +616,15 @@ export function Dashboard() {
                           </button>
                           <button
                             className="tiny-button"
-                            onClick={() =>
-                              setAccountDraft({
-                                id: account.id,
-                                name: account.name,
-                                address: account.address,
-                                chainId: String(account.chain_id),
-                                assetType: account.asset_type,
-                                tokenAddress: account.token_address || "",
-                                token: account.asset_type === "erc20" && account.token_address
-                                  ? {
-                                      address: account.token_address,
-                                      name: account.token_name || account.symbol,
-                                      symbol: account.token_symbol || account.symbol,
-                                      decimals: account.token_decimals ?? 18,
-                                      chainId: account.chain_id,
-                                    }
-                                  : null,
-                                threshold: account.threshold,
-                              })
-                            }
+                            onClick={() => setWalletDraft(walletToDraft(wallet))}
                           >
                             Edit
                           </button>
                           <button
                             className="tiny-button"
                             onClick={() => {
-                              if (window.confirm(`Stop watching ${account.name} on ${account.chain_name}?`)) {
-                                mutate({ action: "delete", id: account.id }, "Account removed.").catch(() => undefined);
+                              if (window.confirm(`Stop watching ${wallet.name} and all its assets on ${wallet.chain_name}?`)) {
+                                mutate({ action: "delete", id: wallet.id }, "Wallet removed.").catch(() => undefined);
                               }
                             }}
                           >
@@ -577,7 +633,7 @@ export function Dashboard() {
                         </div>
                       </div>
                     </article>
-                  ))}
+                  )})}
                 </div>
               </div>
             ))
@@ -585,67 +641,51 @@ export function Dashboard() {
         </section>
       </main>
 
-      {accountDraft && data && (
+      {walletDraft && data && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setAccountDraft(null);
+          if (event.target === event.currentTarget) setWalletDraft(null);
         }}>
-          <form className="modal" onSubmit={saveAccount}>
-            <h2>{accountDraft.id ? "Edit account" : "Add an account"}</h2>
+          <form className="modal modal-wallet" onSubmit={saveWallet}>
+            <h2>{walletDraft.id ? "Edit wallet" : "Add a wallet"}</h2>
             <p className="modal-intro">
-              Watch a native gas token or a validated ERC-20 contract balance.
+              Configure the address once, then add or remove every asset you want to monitor.
             </p>
             <div className="form-grid">
               <div className="field field-full">
-                <label htmlFor="account-name">Name tag</label>
+                <label htmlFor="wallet-name">Name tag</label>
                 <input
-                  id="account-name"
-                  value={accountDraft.name}
-                  onChange={(event) => setAccountDraft({ ...accountDraft, name: event.target.value })}
+                  id="wallet-name"
+                  value={walletDraft.name}
+                  onChange={(event) => setWalletDraft({ ...walletDraft, name: event.target.value })}
                   placeholder="e.g. Production relayer"
                   autoFocus
                   required
                 />
               </div>
               <div className="field field-full">
-                <label htmlFor="account-address">Account address</label>
+                <label htmlFor="wallet-address">Account address</label>
                 <input
-                  id="account-address"
-                  value={accountDraft.address}
-                  onChange={(event) => setAccountDraft({ ...accountDraft, address: event.target.value })}
+                  id="wallet-address"
+                  value={walletDraft.address}
+                  onChange={(event) => setWalletDraft({ ...walletDraft, address: event.target.value })}
                   placeholder="0x…"
                   spellCheck={false}
                   required
                 />
               </div>
               <div className="field field-full">
-                <label htmlFor="account-asset">Asset type</label>
+                <label htmlFor="wallet-network">Network</label>
                 <select
-                  id="account-asset"
-                  value={accountDraft.assetType}
-                  onChange={(event) => {
-                    const assetType = event.target.value === "erc20" ? "erc20" : "native";
-                    setAccountDraft({
-                      ...accountDraft,
-                      assetType,
-                      tokenAddress: assetType === "native" ? "" : accountDraft.tokenAddress,
-                      token: assetType === "native" ? null : accountDraft.token,
-                    });
-                  }}
-                >
-                  <option value="native">Native gas token</option>
-                  <option value="erc20">ERC-20 token</option>
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="account-network">Network</label>
-                <select
-                  id="account-network"
-                  value={accountDraft.chainId}
+                  id="wallet-network"
+                  value={walletDraft.chainId}
                   onChange={(event) =>
-                    setAccountDraft({
-                      ...accountDraft,
+                    setWalletDraft({
+                      ...walletDraft,
                       chainId: event.target.value,
-                      token: null,
+                      assets: walletDraft.assets.map((asset) => ({
+                        ...asset,
+                        token: asset.assetType === "erc20" ? null : asset.token,
+                      })),
                     })
                   }
                 >
@@ -656,76 +696,139 @@ export function Dashboard() {
                   ))}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="account-threshold">Low-balance threshold</label>
-                <input
-                  id="account-threshold"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={accountDraft.threshold}
-                  onChange={(event) => setAccountDraft({ ...accountDraft, threshold: event.target.value })}
-                  required
-                />
-                <span className="helper">
-                  In {accountDraft.assetType === "erc20"
-                    ? accountDraft.token?.symbol || "the token’s units"
-                    : "the network’s native token"}.
-                </span>
+            </div>
+
+            <div className="asset-editor-heading">
+              <div>
+                <h3>Watched assets</h3>
+                <p>Add a native balance or validated ERC-20 contracts.</p>
               </div>
-              {accountDraft.assetType === "erc20" && (
-                <div className="field field-full">
-                  <label htmlFor="token-address">ERC-20 token contract</label>
-                  <div className="field-action-row">
-                    <input
-                      id="token-address"
-                      value={accountDraft.tokenAddress}
-                      onChange={(event) =>
-                        setAccountDraft({
-                          ...accountDraft,
-                          tokenAddress: event.target.value,
-                          token: null,
-                        })
-                      }
-                      placeholder="0x…"
-                      spellCheck={false}
-                      required
-                    />
+              <div className="asset-editor-actions">
+                {!walletDraft.assets.some((asset) => asset.assetType === "native") && (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => setWalletDraft({
+                      ...walletDraft,
+                      assets: [...walletDraft.assets, {
+                        assetType: "native",
+                        tokenAddress: "",
+                        token: null,
+                        threshold: "0.05",
+                      }],
+                    })}
+                  >
+                    ＋ Native
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setWalletDraft({
+                    ...walletDraft,
+                    assets: [...walletDraft.assets, {
+                      assetType: "erc20",
+                      tokenAddress: "",
+                      token: null,
+                      threshold: "1",
+                    }],
+                  })}
+                >
+                  ＋ ERC-20
+                </button>
+              </div>
+            </div>
+
+            <div className="asset-editor-list">
+              {walletDraft.assets.map((asset, index) => (
+                <div className="asset-editor" key={asset.id || `new-${index}`}>
+                  <div className="asset-editor-title">
+                    <strong>{asset.assetType === "native" ? "Native gas token" : `ERC-20 token ${index + 1}`}</strong>
                     <button
                       type="button"
-                      className="button button-secondary"
-                      onClick={validateToken}
-                      disabled={busy || !accountDraft.tokenAddress}
+                      className="tiny-button"
+                      disabled={walletDraft.assets.length === 1}
+                      onClick={() => setWalletDraft({
+                        ...walletDraft,
+                        assets: walletDraft.assets.filter((_, assetIndex) => assetIndex !== index),
+                      })}
                     >
-                      Validate
+                      Remove
                     </button>
                   </div>
-                  {accountDraft.token ? (
-                    <div className="validation-result">
-                      <strong>✓ {accountDraft.token.name}</strong>
-                      <span>
-                        {accountDraft.token.symbol} · {accountDraft.token.decimals} decimals
+                  <div className="form-grid">
+                    {asset.assetType === "erc20" && (
+                      <div className="field field-full">
+                        <label htmlFor={`token-address-${index}`}>Token contract</label>
+                        <div className="field-action-row">
+                          <input
+                            id={`token-address-${index}`}
+                            value={asset.tokenAddress}
+                            onChange={(event) => {
+                              const nextAssets = [...walletDraft.assets];
+                              nextAssets[index] = { ...asset, tokenAddress: event.target.value, token: null };
+                              setWalletDraft({ ...walletDraft, assets: nextAssets });
+                            }}
+                            placeholder="0x…"
+                            spellCheck={false}
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => validateToken(index)}
+                            disabled={busy || !asset.tokenAddress}
+                          >
+                            Validate
+                          </button>
+                        </div>
+                        {asset.token ? (
+                          <div className="validation-result">
+                            <strong>✓ {asset.token.name}</strong>
+                            <span>{asset.token.symbol} · {asset.token.decimals} decimals</span>
+                          </div>
+                        ) : (
+                          <span className="helper">Validate this contract on the selected network before saving.</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="field field-full">
+                      <label htmlFor={`asset-threshold-${index}`}>Low-balance threshold</label>
+                      <input
+                        id={`asset-threshold-${index}`}
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={asset.threshold}
+                        onChange={(event) => {
+                          const nextAssets = [...walletDraft.assets];
+                          nextAssets[index] = { ...asset, threshold: event.target.value };
+                          setWalletDraft({ ...walletDraft, assets: nextAssets });
+                        }}
+                        required
+                      />
+                      <span className="helper">
+                        In {asset.assetType === "erc20"
+                          ? asset.token?.symbol || "the token’s units"
+                          : "the network’s native token"}.
                       </span>
                     </div>
-                  ) : (
-                    <span className="helper">
-                      The contract must pass on-chain code, totalSupply, balanceOf, and decimals checks before it can be saved.
-                    </span>
-                  )}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
             <div className="modal-actions">
-              <button type="button" className="button button-secondary" onClick={() => setAccountDraft(null)}>Cancel</button>
+              <button type="button" className="button button-secondary" onClick={() => setWalletDraft(null)}>Cancel</button>
               <button
                 type="submit"
                 className="button button-primary"
                 disabled={
                   busy ||
-                  (accountDraft.assetType === "erc20" && !accountDraft.token)
+                  walletDraft.assets.length === 0 ||
+                  walletDraft.assets.some((asset) => asset.assetType === "erc20" && !asset.token)
                 }
               >
-                {accountDraft.id ? "Save changes" : "Start watching"}
+                {walletDraft.id ? "Save wallet" : "Start watching"}
               </button>
             </div>
           </form>
@@ -739,7 +842,7 @@ export function Dashboard() {
           <div className="modal">
             <h2>Duplicate to a network</h2>
             <p className="modal-intro">
-              Add {duplicate.account.name} with the same address and threshold on another chain.
+              Copy {duplicate.wallet.name} and all {duplicate.wallet.assets.length} watched assets to another chain. ERC-20 contracts will be validated on the target network.
             </p>
             <div className="field">
               <label htmlFor="duplicate-network">Target network</label>
@@ -749,7 +852,7 @@ export function Dashboard() {
                 onChange={(event) => setDuplicate({ ...duplicate, chainId: event.target.value })}
               >
                 {data.networks
-                  .filter((network) => network.chainId !== duplicate.account.chain_id)
+                  .filter((network) => network.chainId !== duplicate.wallet.chain_id)
                   .map((network) => (
                     <option value={network.chainId} key={network.chainId}>
                       {network.name} · {network.environment === "testnet" ? "Testnet" : "Mainnet"}
@@ -765,8 +868,8 @@ export function Dashboard() {
                 onClick={async () => {
                   try {
                     await mutate(
-                      { action: "duplicate", id: duplicate.account.id, chainId: Number(duplicate.chainId) },
-                      "Account duplicated."
+                      { action: "duplicate", id: duplicate.wallet.id, chainId: Number(duplicate.chainId) },
+                      "Wallet duplicated."
                     );
                     setDuplicate(null);
                   } catch {
@@ -774,7 +877,7 @@ export function Dashboard() {
                   }
                 }}
               >
-                Duplicate account
+                Duplicate wallet
               </button>
             </div>
           </div>
