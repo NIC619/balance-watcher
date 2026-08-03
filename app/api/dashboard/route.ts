@@ -27,7 +27,9 @@ export async function GET(request: Request) {
           ...asset,
           symbol: asset.asset_type === "native"
             ? network?.native_symbol || "NATIVE"
-            : asset.token_symbol || "TOKEN",
+            : asset.asset_type === "succinct_network"
+              ? "PROVE"
+              : asset.token_symbol || "TOKEN",
         })),
       };
     }),

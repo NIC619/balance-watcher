@@ -13,7 +13,7 @@ export type WalletRow = {
 export type AssetRow = {
   id: number;
   wallet_id: number;
-  asset_type: "native" | "erc20";
+  asset_type: "native" | "erc20" | "succinct_network";
   token_address: string | null;
   token_name: string | null;
   token_symbol: string | null;
@@ -159,6 +159,10 @@ async function initializeSchema(db: Queryable) {
      WHERE asset_type = 'erc20'`
   );
   await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS watched_assets_succinct_unique
+     ON watched_assets (wallet_id) WHERE asset_type = 'succinct_network'`
+  );
+  await db.query(
     "CREATE INDEX IF NOT EXISTS watched_wallets_chain_idx ON watched_wallets (chain_id, name)"
   );
   await db.query(
@@ -267,7 +271,11 @@ export async function listWallets(db: Queryable = getDb()) {
     db.query<AssetRow>(
       `SELECT * FROM watched_assets
        ORDER BY wallet_id,
-                CASE WHEN asset_type = 'native' THEN 0 ELSE 1 END,
+                CASE asset_type
+                  WHEN 'native' THEN 0
+                  WHEN 'erc20' THEN 1
+                  ELSE 2
+                END,
                 token_symbol ASC`
     ),
   ]);
@@ -290,13 +298,18 @@ export async function listMonitoredAssets(db: Queryable = getDb()) {
             network.name AS chain_name, network.rpc_url,
             CASE
               WHEN asset.asset_type = 'native' THEN network.native_symbol
+              WHEN asset.asset_type = 'succinct_network' THEN 'PROVE'
               ELSE COALESCE(asset.token_symbol, 'TOKEN')
             END AS symbol
      FROM watched_assets AS asset
      JOIN watched_wallets AS wallet ON wallet.id = asset.wallet_id
      JOIN networks AS network ON network.chain_id = wallet.chain_id
      ORDER BY network.name ASC, wallet.name ASC,
-              CASE WHEN asset.asset_type = 'native' THEN 0 ELSE 1 END,
+              CASE asset.asset_type
+                WHEN 'native' THEN 0
+                WHEN 'erc20' THEN 1
+                ELSE 2
+              END,
               asset.token_symbol ASC`
   );
   return result.rows;

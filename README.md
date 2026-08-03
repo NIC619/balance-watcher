@@ -1,7 +1,8 @@
 # Watchtower
 
-Watchtower monitors native and ERC-20 balances for Ethereum-compatible wallets
-and sends Telegram alerts when an asset crosses below its configured threshold.
+Watchtower monitors native and ERC-20 balances for Ethereum-compatible wallets,
+plus deposited Succinct Network PROVE balances, and sends Telegram alerts when
+an asset crosses below its configured threshold.
 
 ## Architecture
 
@@ -10,6 +11,7 @@ and sends Telegram alerts when an asset crosses below its configured threshold.
 - Independent 24/7 monitor worker
 - Single-owner authentication using an HTTP-only signed session cookie
 - On-chain ERC-20 contract and metadata validation
+- Succinct Network credit checks through its unauthenticated balance API
 - Editable built-in networks and validated custom EVM RPC networks
 
 The web service and worker share the same `DATABASE_URL`. A PostgreSQL advisory
@@ -34,6 +36,18 @@ reads the token name and symbol when available.
 Token contracts are network-specific. Duplicating an ERC-20 watch to another
 network succeeds only if the same contract address validates on the target
 network.
+
+### Succinct Network balances
+
+Use **+ Succinct** in a wallet editor to monitor the address's deposited PROVE
+credit on Succinct Network. This is the **network balance** used to pay for
+proofs, not the PROVE token balance held in the wallet. Watchtower reads it from
+Succinct's unauthenticated `ProverNetwork.GetBalance` API and links the asset row
+to the address's requester page in Succinct Explorer.
+
+A Succinct balance can be watched once per address across the dashboard. When a
+wallet is duplicated to another EVM network, this address-wide asset remains on
+the original card while native and ERC-20 assets are copied.
 
 ### Networks
 

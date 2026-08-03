@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 type Asset = {
   id: number;
   symbol: string;
-  asset_type: "native" | "erc20";
+  asset_type: "native" | "erc20" | "succinct_network";
   token_address: string | null;
   token_name: string | null;
   token_symbol: string | null;
@@ -51,7 +51,7 @@ type DashboardData = {
 
 type AssetDraft = {
   id?: number;
-  assetType: "native" | "erc20";
+  assetType: "native" | "erc20" | "succinct_network";
   tokenAddress: string;
   token: TokenMetadata | null;
   threshold: string;
@@ -105,6 +105,8 @@ const emptyNetwork: NetworkDraft = {
   environment: "mainnet",
   color: "#356b52",
 };
+
+const SUCCINCT_EXPLORER_URL = "https://explorer.succinct.xyz";
 
 function shortenAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
@@ -485,10 +487,10 @@ export function Dashboard() {
       <main className="main">
         <section className="hero">
           <div>
-            <p className="eyebrow">EVM balance monitoring</p>
+            <p className="eyebrow">Balance monitoring</p>
             <h1>Keep every account above the line.</h1>
             <p className="hero-copy">
-              Monitor native and ERC-20 balances across configured EVM networks and get a Telegram alert when an account falls below its safety threshold.
+              Monitor native tokens, ERC-20 tokens, and deposited Succinct Network PROVE balances, with Telegram alerts below your safety thresholds.
             </p>
           </div>
           <button
@@ -616,10 +618,23 @@ export function Dashboard() {
                               <strong>
                                 {asset.asset_type === "native"
                                   ? `${asset.symbol} · Native`
-                                  : `${asset.token_name || asset.symbol} · ${asset.symbol}`}
+                                  : asset.asset_type === "succinct_network"
+                                    ? "Succinct Network · PROVE"
+                                    : `${asset.token_name || asset.symbol} · ${asset.symbol}`}
                               </strong>
                               {asset.token_address && (
                                 <span title={asset.token_address}>{shortenAddress(asset.token_address)}</span>
+                              )}
+                              {asset.asset_type === "succinct_network" && (
+                                <a
+                                  className="account-address-action"
+                                  href={`${SUCCINCT_EXPLORER_URL}/requester/${wallet.address}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title="Open the deposited network balance in Succinct Explorer"
+                                >
+                                  View requester ↗
+                                </a>
                               )}
                               <span className="checked">{formatChecked(asset.last_checked_at)}</span>
                             </div>
@@ -640,6 +655,14 @@ export function Dashboard() {
                         <div className="account-actions">
                           <button
                             className="tiny-button"
+                            disabled={wallet.assets.every(
+                              (asset) => asset.asset_type === "succinct_network"
+                            )}
+                            title={wallet.assets.every(
+                              (asset) => asset.asset_type === "succinct_network"
+                            )
+                              ? "Succinct Network balance is address-wide and does not need a second chain card."
+                              : undefined}
                             onClick={() =>
                               setDuplicate({
                                 wallet,
@@ -736,7 +759,7 @@ export function Dashboard() {
             <div className="asset-editor-heading">
               <div>
                 <h3>Watched assets</h3>
-                <p>Add a native balance or validated ERC-20 contracts.</p>
+                <p>Add native, validated ERC-20, or deposited Succinct Network balances.</p>
               </div>
               <div className="asset-editor-actions">
                 {!walletDraft.assets.some((asset) => asset.assetType === "native") && (
@@ -771,6 +794,23 @@ export function Dashboard() {
                 >
                   ＋ ERC-20
                 </button>
+                {!walletDraft.assets.some((asset) => asset.assetType === "succinct_network") && (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => setWalletDraft({
+                      ...walletDraft,
+                      assets: [...walletDraft.assets, {
+                        assetType: "succinct_network",
+                        tokenAddress: "",
+                        token: null,
+                        threshold: "10",
+                      }],
+                    })}
+                  >
+                    ＋ Succinct
+                  </button>
+                )}
               </div>
             </div>
 
@@ -778,7 +818,13 @@ export function Dashboard() {
               {walletDraft.assets.map((asset, index) => (
                 <div className="asset-editor" key={asset.id || `new-${index}`}>
                   <div className="asset-editor-title">
-                    <strong>{asset.assetType === "native" ? "Native gas token" : `ERC-20 token ${index + 1}`}</strong>
+                    <strong>
+                      {asset.assetType === "native"
+                        ? "Native gas token"
+                        : asset.assetType === "succinct_network"
+                          ? "Succinct Network balance"
+                          : `ERC-20 token ${index + 1}`}
+                    </strong>
                     <button
                       type="button"
                       className="tiny-button"
@@ -845,7 +891,9 @@ export function Dashboard() {
                       <span className="helper">
                         In {asset.assetType === "erc20"
                           ? asset.token?.symbol || "the token’s units"
-                          : "the network’s native token"}.
+                          : asset.assetType === "succinct_network"
+                            ? "deposited PROVE credits (not wallet PROVE)"
+                            : "the network’s native token"}.
                       </span>
                     </div>
                   </div>
@@ -877,7 +925,7 @@ export function Dashboard() {
           <div className="modal">
             <h2>Duplicate to a network</h2>
             <p className="modal-intro">
-              Copy {duplicate.wallet.name} and all {duplicate.wallet.assets.length} watched assets to another chain. ERC-20 contracts will be validated on the target network.
+              Copy {duplicate.wallet.name}&apos;s chain-specific assets to another network. ERC-20 contracts will be validated there. Succinct Network balance is address-wide, so it stays on the original card.
             </p>
             <div className="field">
               <label htmlFor="duplicate-network">Target network</label>

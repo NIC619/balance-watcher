@@ -19,7 +19,7 @@ import {
 
 type AssetInput = {
   id?: number;
-  assetType: "native" | "erc20";
+  assetType: "native" | "erc20" | "succinct_network";
   threshold: string;
   tokenAddress: string;
 };
@@ -52,14 +52,23 @@ async function walletInput(
 
   const rawAssets = body.assets as Array<Record<string, unknown>>;
   let nativeCount = 0;
+  let succinctCount = 0;
   const seenTokens = new Set<string>();
   const assets = await Promise.all(
     rawAssets.map(async (raw): Promise<ValidatedAsset> => {
-      const assetType = raw.assetType === "erc20" ? "erc20" : "native";
+      const assetType = raw.assetType === "erc20"
+        ? "erc20"
+        : raw.assetType === "succinct_network"
+          ? "succinct_network"
+          : "native";
       const threshold = thresholdValue(raw.threshold);
       const id = Number(raw.id) > 0 ? Number(raw.id) : undefined;
       if (assetType === "native") {
         nativeCount += 1;
+        return { id, assetType, threshold, tokenAddress: "", token: null };
+      }
+      if (assetType === "succinct_network") {
+        succinctCount += 1;
         return { id, assetType, threshold, tokenAddress: "", token: null };
       }
 
@@ -74,6 +83,9 @@ async function walletInput(
   );
   if (nativeCount > 1) {
     throw new Error("A wallet can only have one native-token watch.");
+  }
+  if (succinctCount > 1) {
+    throw new Error("A wallet can only have one Succinct Network balance watch.");
   }
   return { name, address, assets };
 }
@@ -130,7 +142,9 @@ export async function POST(request: Request) {
         [wallet.id]
       );
       const validatedAssets = await Promise.all(
-        sourceAssets.rows.map(async (asset): Promise<ValidatedAsset> => {
+        sourceAssets.rows
+          .filter((asset) => asset.asset_type !== "succinct_network")
+          .map(async (asset): Promise<ValidatedAsset> => {
           const token = asset.asset_type === "erc20"
             ? await validateErc20Token(
                 targetNetwork.rpc_url,
@@ -145,6 +159,11 @@ export async function POST(request: Request) {
           };
         })
       );
+      if (!validatedAssets.length) {
+        throw new Error(
+          "Succinct Network balance is address-wide and is not duplicated to another EVM network. Add another asset first."
+        );
+      }
 
       const client = await pool.connect();
       try {
@@ -180,6 +199,23 @@ export async function POST(request: Request) {
     if (!network) throw new Error("Choose a configured network.");
     const input = await walletInput(body, network);
     const walletId = Number(body.id) > 0 ? Number(body.id) : undefined;
+    if (input.assets.some((asset) => asset.assetType === "succinct_network")) {
+      const duplicateSuccinct = await pool.query(
+        `SELECT 1
+         FROM watched_assets AS asset
+         JOIN watched_wallets AS wallet ON wallet.id = asset.wallet_id
+         WHERE asset.asset_type = 'succinct_network'
+           AND LOWER(wallet.address) = $1
+           AND ($2::int IS NULL OR wallet.id <> $2)
+         LIMIT 1`,
+        [input.address, walletId || null]
+      );
+      if (duplicateSuccinct.rowCount) {
+        throw new Error(
+          "This address's Succinct Network balance is already watched on another card."
+        );
+      }
+    }
     const client = await pool.connect();
 
     try {

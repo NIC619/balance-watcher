@@ -6,6 +6,11 @@ import {
   type MonitoredAssetRow,
 } from "./database";
 import { readErc20Balance, readNativeBalance } from "./evm";
+import {
+  readSuccinctNetworkBalance,
+  SUCCINCT_EXPLORER_URL,
+  SUCCINCT_TOKEN_DECIMALS,
+} from "./succinct";
 
 const MONITOR_LOCK_ID = 8_207_331;
 
@@ -35,7 +40,9 @@ function toScaledInteger(value: string, decimals = 18) {
 async function readBalance(asset: MonitoredAssetRow) {
   const decimals = asset.asset_type === "erc20"
     ? asset.token_decimals
-    : 18;
+    : asset.asset_type === "succinct_network"
+      ? SUCCINCT_TOKEN_DECIMALS
+      : 18;
   if (decimals === null) {
     throw new Error("ERC-20 token decimals are missing.");
   }
@@ -45,7 +52,9 @@ async function readBalance(asset: MonitoredAssetRow) {
         asset.token_address || "",
         asset.address
       )
-    : await readNativeBalance(asset.rpc_url, asset.address);
+    : asset.asset_type === "succinct_network"
+      ? await readSuccinctNetworkBalance(asset.address)
+      : await readNativeBalance(asset.rpc_url, asset.address);
   return { raw, decimals, display: formatUnits(raw, decimals) };
 }
 
@@ -65,6 +74,12 @@ async function sendTelegram(
       ? [
           `Token: ${asset.token_name || asset.symbol} (${asset.symbol})`,
           `Contract: ${asset.token_address}`,
+        ]
+      : []),
+    ...(asset.asset_type === "succinct_network"
+      ? [
+          "Asset: Succinct Network Balance (PROVE)",
+          `Explorer: ${SUCCINCT_EXPLORER_URL}/requester/${asset.address}`,
         ]
       : []),
     `Balance: ${balance} ${asset.symbol}`,
