@@ -16,6 +16,7 @@ function networkFields(body: Record<string, unknown>) {
   const environment: "mainnet" | "testnet" =
     body.environment === "testnet" ? "testnet" : "mainnet";
   const colorInput = String(body.color || "").trim();
+  const explorerInput = String(body.explorerUrl || "").trim();
   if (!name || name.length > 80) {
     throw new Error("Network name must be between 1 and 80 characters.");
   }
@@ -25,7 +26,25 @@ function networkFields(body: Record<string, unknown>) {
   if (colorInput && !/^#[0-9a-fA-F]{6}$/.test(colorInput)) {
     throw new Error("Choose a valid network color.");
   }
-  return { name, nativeSymbol, environment, colorInput };
+  let explorerUrl: string | null = null;
+  if (explorerInput) {
+    try {
+      const parsed = new URL(explorerInput);
+      if (
+        !["http:", "https:"].includes(parsed.protocol) ||
+        parsed.username ||
+        parsed.password
+      ) {
+        throw new Error();
+      }
+      parsed.search = "";
+      parsed.hash = "";
+      explorerUrl = parsed.toString().replace(/\/$/, "");
+    } catch {
+      throw new Error("Explorer URL must be a valid HTTP or HTTPS URL.");
+    }
+  }
+  return { name, nativeSymbol, environment, colorInput, explorerUrl };
 }
 
 export async function POST(request: Request) {
@@ -69,14 +88,16 @@ export async function POST(request: Request) {
       await db.query(
         `UPDATE networks
          SET name = $1, native_symbol = $2, rpc_url = $3, color = $4,
-             environment = $5, updated_at = CURRENT_TIMESTAMP
-         WHERE chain_id = $6`,
+             environment = $5, explorer_url = $6,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE chain_id = $7`,
         [
           fields.name,
           fields.nativeSymbol,
           validated.rpcUrl,
           fields.colorInput || existing.color,
           fields.environment,
+          fields.explorerUrl,
           originalChainId,
         ]
       );
@@ -89,13 +110,14 @@ export async function POST(request: Request) {
       }
       await db.query(
         `INSERT INTO networks
-         (chain_id, name, native_symbol, rpc_url, color, environment)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         (chain_id, name, native_symbol, rpc_url, explorer_url, color, environment)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           validated.chainId,
           fields.name,
           fields.nativeSymbol,
           validated.rpcUrl,
+          fields.explorerUrl,
           fields.colorInput ||
             defaultNetworkColor(validated.chainId, fields.environment),
           fields.environment,

@@ -23,6 +23,8 @@ test("ships the private Watchtower dashboard and worker", async () => {
   assert.match(dashboard, /wallet\.assets\.map/);
   assert.match(dashboard, /Connect Telegram/);
   assert.match(dashboard, /Manage networks/);
+  assert.match(dashboard, /explorerAddressUrl/);
+  assert.match(dashboard, /Account address copied/);
   assert.match(dashboard, /ERC-20 token/);
   assert.match(dashboard, /Validate RPC & save/);
   assert.match(login, /Private monitoring/);

@@ -407,6 +407,30 @@ h1 {
   font: 11px var(--font-geist-mono), monospace;
 }
 
+.account-address-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.account-address-action span {
+  color: #9aa39d;
+  font-family: sans-serif;
+  font-size: 10px;
+}
+
+.account-address-action:hover,
+.account-address-action:focus-visible {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .asset-label {
   display: flex;
   align-items: center;

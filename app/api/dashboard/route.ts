@@ -44,6 +44,7 @@ export async function GET(request: Request) {
       name: network.name,
       nativeSymbol: network.native_symbol,
       rpcUrl: network.rpc_url,
+      explorerUrl: network.explorer_url,
       color: network.color,
       environment: network.environment,
       isPreset: network.is_preset,

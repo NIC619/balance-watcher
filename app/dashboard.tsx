@@ -30,6 +30,7 @@ type Network = {
   name: string;
   nativeSymbol: string;
   rpcUrl: string;
+  explorerUrl: string | null;
   color: string;
   environment: "mainnet" | "testnet";
   isPreset: boolean;
@@ -76,6 +77,7 @@ type NetworkDraft = {
   chainId?: number;
   name: string;
   rpcUrl: string;
+  explorerUrl: string;
   nativeSymbol: string;
   environment: "mainnet" | "testnet";
   color: string;
@@ -98,6 +100,7 @@ const emptyWallet: WalletDraft = {
 const emptyNetwork: NetworkDraft = {
   name: "",
   rpcUrl: "",
+  explorerUrl: "",
   nativeSymbol: "ETH",
   environment: "mainnet",
   color: "#356b52",
@@ -130,6 +133,10 @@ function rpcHostname(rpcUrl: string) {
   } catch {
     return rpcUrl;
   }
+}
+
+function explorerAddressUrl(explorerUrl: string, address: string) {
+  return `${explorerUrl.replace(/\/$/, "")}/address/${address}`;
 }
 
 const statusPriority: Record<Asset["status"], number> = {
@@ -410,6 +417,15 @@ export function Dashboard() {
     }
   }
 
+  async function copyAddress(address: string) {
+    try {
+      await navigator.clipboard.writeText(address);
+      notify("Account address copied.");
+    } catch {
+      notify("Could not copy the account address.", true);
+    }
+  }
+
   function openSettings() {
     if (!data) return;
     setSettingsDraft({ ...data.settings });
@@ -568,7 +584,26 @@ export function Dashboard() {
                       <div className="account-head">
                         <div>
                           <div className="account-name">{wallet.name}</div>
-                          <div className="account-address" title={wallet.address}>{shortenAddress(wallet.address)}</div>
+                          {network?.explorerUrl ? (
+                            <a
+                              className="account-address account-address-action"
+                              href={explorerAddressUrl(network.explorerUrl, wallet.address)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`Open ${wallet.address} in ${network.name} explorer`}
+                            >
+                              {shortenAddress(wallet.address)} <span aria-hidden="true">↗</span>
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              className="account-address account-address-action"
+                              title={`Copy ${wallet.address}`}
+                              onClick={() => void copyAddress(wallet.address)}
+                            >
+                              {shortenAddress(wallet.address)} <span aria-hidden="true">⧉</span>
+                            </button>
+                          )}
                         </div>
                         <span className={`status-pill ${overallStatus}`}>
                           {statusLabel(overallStatus)}
@@ -935,6 +970,7 @@ export function Dashboard() {
                           chainId: network.chainId,
                           name: network.name,
                           rpcUrl: network.rpcUrl,
+                          explorerUrl: network.explorerUrl || "",
                           nativeSymbol: network.nativeSymbol,
                           environment: network.environment,
                           color: /^#[0-9a-fA-F]{6}$/.test(network.color)
@@ -1005,6 +1041,22 @@ export function Dashboard() {
                     />
                     <span className="helper">
                       Watchtower calls eth_chainId and derives the chain ID automatically.
+                    </span>
+                  </div>
+                  <div className="field field-full">
+                    <label htmlFor="network-explorer">Explorer URL (optional)</label>
+                    <input
+                      id="network-explorer"
+                      type="url"
+                      value={networkDraft.explorerUrl}
+                      onChange={(event) =>
+                        setNetworkDraft({ ...networkDraft, explorerUrl: event.target.value })
+                      }
+                      placeholder="https://explorer.example"
+                      spellCheck={false}
+                    />
+                    <span className="helper">
+                      Used to open account pages. Without one, clicking an address copies it.
                     </span>
                   </div>
                   {networkDraft.chainId && (

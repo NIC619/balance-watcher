@@ -46,6 +46,7 @@ export type NetworkRow = {
   name: string;
   native_symbol: string;
   rpc_url: string;
+  explorer_url: string | null;
   color: string;
   environment: "mainnet" | "testnet";
   is_preset: boolean;
@@ -92,6 +93,7 @@ async function initializeSchema(db: Queryable) {
       name TEXT NOT NULL,
       native_symbol TEXT NOT NULL,
       rpc_url TEXT NOT NULL,
+      explorer_url TEXT,
       color TEXT NOT NULL,
       environment TEXT NOT NULL DEFAULT 'mainnet',
       is_preset BOOLEAN NOT NULL DEFAULT FALSE,
@@ -99,17 +101,19 @@ async function initializeSchema(db: Queryable) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await db.query("ALTER TABLE networks ADD COLUMN IF NOT EXISTS explorer_url TEXT");
   for (const network of NETWORK_PRESETS) {
     await db.query(
       `INSERT INTO networks
-       (chain_id, name, native_symbol, rpc_url, color, environment, is_preset)
-       VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+       (chain_id, name, native_symbol, rpc_url, explorer_url, color, environment, is_preset)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
        ON CONFLICT (chain_id) DO NOTHING`,
       [
         network.chainId,
         network.name,
         network.nativeSymbol,
         network.rpcUrl,
+        network.explorerUrl,
         network.color,
         network.environment,
       ]
@@ -178,6 +182,24 @@ async function initializeSchema(db: Queryable) {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  const explorerMigration = "preset_explorer_urls_v1";
+  const explorerApplied = await db.query<{ applied: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM app_migrations WHERE name = $1) AS applied",
+    [explorerMigration]
+  );
+  if (!explorerApplied.rows[0]?.applied) {
+    for (const network of NETWORK_PRESETS) {
+      await db.query(
+        "UPDATE networks SET explorer_url = $1 WHERE chain_id = $2",
+        [network.explorerUrl, network.chainId]
+      );
+    }
+    await db.query(
+      "INSERT INTO app_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING",
+      [explorerMigration]
+    );
+  }
 
   const migrationName = "normalize_wallet_assets_v1";
   const migration = await db.query<{ applied: boolean }>(

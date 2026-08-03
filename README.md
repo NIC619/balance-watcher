@@ -38,13 +38,17 @@ network.
 ### Networks
 
 Open **Manage networks** to add or edit networks. Enter the name, native token
-symbol, environment, color, and RPC URL. Watchtower calls `eth_chainId` through
-the RPC before saving:
+symbol, environment, color, RPC URL, and an optional explorer URL. Watchtower
+calls `eth_chainId` through the RPC before saving:
 
 - New custom networks derive their chain ID from the RPC.
 - Editing a network requires the RPC to report the existing chain ID.
 - Built-in networks can be edited but not deleted.
 - Custom networks can be deleted when no watched wallets use them.
+
+Clicking a wallet address opens its address page in the configured network
+explorer. If that network has no explorer URL, clicking the address copies it
+to the clipboard instead.
 
 Network configuration and token metadata are persisted in PostgreSQL. Existing
 flat account rows migrate automatically into `watched_wallets` and
